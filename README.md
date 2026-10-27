@@ -2,16 +2,7 @@
 
 Continuously builds a bootc image from a Git repo with CodePipeline and CodeBuild, publishes it to ECR as a signed multi-arch image, and optionally turns each build into an AMI.
 
-```
-push to branch / weekly schedule
-        │
-   ┌────▼────┐   ┌──────────┐   ┌────────────────┐   ┌─────────┐   ┌──────────────────┐   ┌─────────────────────────┐
-   │ Source  ├──►│ Builder  ├──►│ Build          ├──►│ Publish ├──►│ AMI (optional)   ├──►│ Promote (optional)      │
-   │ Git     │   │ podman   │   │ amd64 │ arm64  │   │ index   │   │ amd64 │ arm64    │   │ approve → :stable       │
-   │ commit  │   │ image    │   │ build+lint+push│   │ sign    │   │ bib → snapshot   │   │                         │
-   └─────────┘   │ (cached) │   └────────────────┘   │ :latest │   │ → AMI → SSM param│   └─────────────────────────┘
-                 └──────────┘                        └─────────┘   └──────────────────┘
-```
+![pipeline](./docs/pipeline.png)
 
 | Tag | Meaning |
 | --- | --- |
