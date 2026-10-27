@@ -1,0 +1,23 @@
+# Builds the podman builder image on the curated CodeBuild image (Docker).
+# Terraform passes the Containerfile in base64 and tags it with its content hash,
+# so this is a no-op after the first run until builder/Containerfile changes.
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  build:
+    commands:
+      - |
+        set -eo pipefail
+        if aws ecr describe-images --repository-name "$BUILDER_REPO_NAME" \
+             --image-ids imageTag="$BUILDER_TAG" >/dev/null 2>&1; then
+          echo "Builder image $BUILDER_IMAGE already exists, skipping."
+        else
+          aws ecr get-login-password | docker login --username AWS --password-stdin "$REGISTRY"
+          mkdir -p /tmp/builder
+          echo "$BUILDER_CONTAINERFILE_B64" | base64 -d > /tmp/builder/Containerfile
+          docker build --pull -t "$BUILDER_IMAGE" /tmp/builder
+          docker push "$BUILDER_IMAGE"
+        fi

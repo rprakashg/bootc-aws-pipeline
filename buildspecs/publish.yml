@@ -1,0 +1,46 @@
+# Joins the per-arch images into one multi-arch index tagged <tag>, signs the
+# index digest with cosign (KMS), then moves the channel tag to that digest.
+version: 0.2
+
+env:
+  shell: bash
+  exported-variables:
+    - IMAGE_TAG
+    - IMAGE_DIGEST
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -eo pipefail
+        export IMAGE_TAG="${COMMIT_ID:0:12}-${EXECUTION_ID:0:8}"
+        aws ecr get-login-password | podman login --username AWS --password-stdin "$REGISTRY"
+
+  build:
+    commands:
+      - |
+        set -eo pipefail
+        INDEX="$IMAGE_REPO_URL:$IMAGE_TAG"
+        podman manifest create "$INDEX"
+        for arch in $ARCHITECTURES; do
+          podman manifest add "$INDEX" "docker://$IMAGE_REPO_URL:$IMAGE_TAG-$arch"
+        done
+        podman manifest inspect "$INDEX"
+        podman manifest push --all --digestfile /tmp/digest "$INDEX" "docker://$INDEX"
+        IMAGE_DIGEST="$(cat /tmp/digest)"
+        export IMAGE_DIGEST
+        echo "Published $INDEX@$IMAGE_DIGEST"
+      - |
+        set -eo pipefail
+        if [ -n "${SIGNING_KEY_ARN:-}" ]; then
+          # Private registry: keep signatures in ECR only, nothing goes to the public Rekor log.
+          cosign sign --yes --tlog-upload=false \
+            --key "awskms:///$SIGNING_KEY_ARN" \
+            -a "commit=$COMMIT_ID" -a "repo=$REPO_ID" \
+            "$IMAGE_REPO_URL@$IMAGE_DIGEST"
+        fi
+      - |
+        set -eo pipefail
+        skopeo copy --all --preserve-digests \
+          "docker://$IMAGE_REPO_URL@$IMAGE_DIGEST" "docker://$IMAGE_REPO_URL:$CHANNEL_TAG"
+        echo "Moved :$CHANNEL_TAG -> $IMAGE_DIGEST"

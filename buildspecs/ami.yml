@@ -1,0 +1,100 @@
+# Converts the just-published bootc image for $ARCH into an AMI:
+#   bootc-image-builder -> raw disk -> S3 -> EBS snapshot (VM Import) -> AMI.
+# The disk is imported with the AWS CLI rather than bib's own uploader so the
+# nested container never needs AWS credentials.
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -eo pipefail
+        export SRC="$IMAGE_REPO_URL:$IMAGE_TAG-$ARCH"
+        aws ecr get-login-password | podman login --username AWS --password-stdin "$REGISTRY"
+        if [ -n "${RH_REGISTRY_USERNAME:-}" ]; then
+          echo "$RH_REGISTRY_PASSWORD" | podman login --username "$RH_REGISTRY_USERNAME" --password-stdin registry.redhat.io
+        fi
+        if ! losetup -f >/dev/null 2>&1; then
+          echo "No free loop device in this build container; bootc-image-builder needs one."
+          echo "Run this project on a CodeBuild reserved-capacity (EC2) fleet instead. See README."
+          false
+        fi
+        # bib reads the image from local container storage.
+        podman pull "$SRC"
+
+  build:
+    commands:
+      - |
+        set -eo pipefail
+        mkdir -p output
+        CFG=()
+        if [ -n "${BIB_CONFIG:-}" ]; then
+          CFG=(-v "$PWD/$BIB_CONFIG:/config.toml:ro")
+        fi
+        podman run --rm --privileged --pull=newer \
+          --security-opt label=type:unconfined_t \
+          -v /var/lib/containers/storage:/var/lib/containers/storage \
+          -v "$PWD/output:/output" \
+          "${CFG[@]}" \
+          "$BIB_IMAGE" \
+          --type ami --rootfs xfs \
+          "$SRC"
+        DISK="$(find output -type f -name '*.raw' | head -n1)"
+        test -n "$DISK" || { echo "bootc-image-builder produced no raw disk"; false; }
+        ls -lh "$DISK"
+        export DISK
+
+      - |
+        set -eo pipefail
+        KEY="$IMAGE_TAG-$ARCH.raw"
+        aws s3 cp --only-show-errors "$DISK" "s3://$IMPORT_BUCKET/$KEY"
+        CONTAINER="$(jq -nc --arg b "$IMPORT_BUCKET" --arg k "$KEY" \
+          '{Format: "RAW", UserBucket: {S3Bucket: $b, S3Key: $k}}')"
+        TASK="$(aws ec2 import-snapshot --role-name "$VMIMPORT_ROLE" \
+          --description "bootc $IMAGE_TAG $ARCH" \
+          --disk-container "$CONTAINER" \
+          --query ImportTaskId --output text)"
+        echo "Import task $TASK"
+        while :; do
+          DETAIL="$(aws ec2 describe-import-snapshot-tasks --import-task-ids "$TASK" \
+            --query 'ImportSnapshotTasks[0].SnapshotTaskDetail' --output json)"
+          STATUS="$(jq -r '.Status' <<<"$DETAIL")"
+          echo "$(date -u +%T) $STATUS $(jq -r '.Progress // "" ' <<<"$DETAIL")% $(jq -r '.StatusMessage // ""' <<<"$DETAIL")"
+          case "$STATUS" in
+            completed) break ;;
+            deleted|deleting) echo "Import failed"; false ;;
+          esac
+          sleep 30
+        done
+        SNAPSHOT_ID="$(jq -r '.SnapshotId' <<<"$DETAIL")"
+        export SNAPSHOT_ID
+        aws s3 rm --only-show-errors "s3://$IMPORT_BUCKET/$KEY"
+
+      - |
+        set -eo pipefail
+        SNAP_GB="$(aws ec2 describe-snapshots --snapshot-ids "$SNAPSHOT_ID" \
+          --query 'Snapshots[0].VolumeSize' --output text)"
+        SIZE=$(( SNAP_GB > ROOT_VOLUME_SIZE ? SNAP_GB : ROOT_VOLUME_SIZE ))
+        NAME="$AMI_NAME_PREFIX-$IMAGE_TAG-$ARCH"
+        MAPPING="$(jq -nc --arg s "$SNAPSHOT_ID" --argjson z "$SIZE" \
+          '[{DeviceName: "/dev/xvda", Ebs: {SnapshotId: $s, VolumeSize: $z, VolumeType: "gp3", DeleteOnTermination: true}}]')"
+        TAG_SPEC="$(jq -nc --arg n "$NAME" --arg i "$IMAGE_REPO_URL@$IMAGE_DIGEST" --arg c "$COMMIT_ID" \
+          '[{ResourceType: "image", Tags: [{Key: "Name", Value: $n}, {Key: "bootc-image", Value: $i}, {Key: "commit", Value: $c}]}]')"
+        AMI_ID="$(aws ec2 register-image \
+          --name "$NAME" \
+          --description "bootc $IMAGE_REPO_NAME $IMAGE_TAG ($ARCH)" \
+          --architecture "$EC2_ARCH" \
+          --virtualization-type hvm \
+          --ena-support \
+          --boot-mode "$BOOT_MODE" \
+          --root-device-name /dev/xvda \
+          --block-device-mappings "$MAPPING" \
+          --tag-specifications "$TAG_SPEC" \
+          --query ImageId --output text)"
+        aws ec2 create-tags --resources "$SNAPSHOT_ID" --tags "Key=Name,Value=$NAME" "Key=commit,Value=$COMMIT_ID"
+        aws ssm put-parameter --name "$AMI_PARAMETER" --type String --data-type aws:ec2:image \
+          --value "$AMI_ID" --overwrite >/dev/null
+        echo "Registered $AMI_ID ($NAME); $AMI_PARAMETER now points to it."

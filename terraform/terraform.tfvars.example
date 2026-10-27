@@ -1,0 +1,31 @@
+name          = "edge-os"
+aws_region    = "us-east-1"
+repository_id = "your-org/edge-os-image"
+branch        = "main"
+
+# Build natively on both; hosts get one multi-arch tag.
+architectures = ["amd64", "arm64"]
+
+# Only start a build when the image definition changes.
+# trigger_file_paths = ["Containerfile", "files/**"]
+
+# Reuse an existing, already-approved connection instead of creating one.
+# connection_arn = "arn:aws:codeconnections:us-east-1:111122223333:connection/..."
+
+# Required for registry.redhat.io/rhel9/rhel-bootc or rhel10/rhel-bootc bases.
+# Secret value: {"username": "1234567|svc-account", "password": "..."}
+# redhat_registry_secret_arn = "arn:aws:secretsmanager:us-east-1:111122223333:secret:rh-registry-AbCdEf"
+
+channel_tag      = "latest"
+enable_promotion = true
+promotion_tag    = "stable"
+
+# Weekly rebuild to pull in base image fixes. "" to disable.
+rebuild_schedule = "cron(0 6 ? * MON *)"
+
+enable_signing = true
+
+# AMIs per build (adds ~20-40 min per architecture).
+enable_ami = false
+# bib_image       = "registry.redhat.io/rhel9/bootc-image-builder:latest"
+# bib_config_path = "bib/config.toml"

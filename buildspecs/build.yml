@@ -1,0 +1,46 @@
+# Builds the bootc image natively for $ARCH, lints it, pushes <tag>-<arch>.
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  pre_build:
+    commands:
+      - |
+        set -eo pipefail
+        export IMAGE_TAG="${COMMIT_ID:0:12}-${EXECUTION_ID:0:8}"
+        export IMAGE="$IMAGE_REPO_URL:$IMAGE_TAG-$ARCH"
+        echo "Building $IMAGE from $REPO_ID@$COMMIT_ID"
+        podman info --format '{{.Store.GraphDriverName}} on {{.Store.GraphRoot}}'
+        aws ecr get-login-password | podman login --username AWS --password-stdin "$REGISTRY"
+        if [ -n "${RH_REGISTRY_USERNAME:-}" ]; then
+          echo "$RH_REGISTRY_PASSWORD" | podman login --username "$RH_REGISTRY_USERNAME" --password-stdin registry.redhat.io
+        fi
+
+  build:
+    commands:
+      - |
+        set -eo pipefail
+        # BUILD_ARGS is a space-separated list of --build-arg k=v; word splitting is intended.
+        # shellcheck disable=SC2086
+        podman build \
+          --pull=always \
+          --file "$CONTAINERFILE" \
+          --tag "$IMAGE" \
+          --label "org.opencontainers.image.source=$REPO_ID" \
+          --label "org.opencontainers.image.revision=$COMMIT_ID" \
+          --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+          $BUILD_ARGS \
+          "$BUILD_CONTEXT"
+      # Fails the build on anything bootc would reject at install or upgrade time.
+      - podman run --rm "$IMAGE" bootc container lint
+
+  post_build:
+    commands:
+      - |
+        set -eo pipefail
+        if [ "$CODEBUILD_BUILD_SUCCEEDING" = "1" ]; then
+          podman push "$IMAGE"
+          echo "Pushed $IMAGE"
+        fi

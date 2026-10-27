@@ -1,0 +1,16 @@
+# Runs after manual approval: points the promotion tag at the exact digest that
+# was published (and signed) earlier in this execution.
+version: 0.2
+
+env:
+  shell: bash
+
+phases:
+  build:
+    commands:
+      - |
+        set -eo pipefail
+        aws ecr get-login-password | podman login --username AWS --password-stdin "$REGISTRY"
+        skopeo copy --all --preserve-digests \
+          "docker://$IMAGE_REPO_URL@$IMAGE_DIGEST" "docker://$IMAGE_REPO_URL:$PROMOTION_TAG"
+        echo "Promoted $IMAGE_TAG ($IMAGE_DIGEST) to :$PROMOTION_TAG"
