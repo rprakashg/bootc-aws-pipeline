@@ -1,4 +1,4 @@
-# Converts the just-published bootc image for $ARCH into an AMI:
+# Converts the just-published bootc image into an x86_64 AMI:
 #   bootc-image-builder -> raw disk -> S3 -> EBS snapshot (VM Import) -> AMI.
 # The disk is imported with the AWS CLI rather than bib's own uploader so the
 # nested container never needs AWS credentials.
@@ -12,7 +12,7 @@ phases:
     commands:
       - |
         set -eo pipefail
-        export SRC="$IMAGE_REPO_URL:$IMAGE_TAG-$ARCH"
+        export SRC="$IMAGE_REPO_URL:$IMAGE_TAG"
         aws ecr get-login-password | podman login --username AWS --password-stdin "$REGISTRY"
         if [ -n "${RH_REGISTRY_USERNAME:-}" ]; then
           echo "$RH_REGISTRY_PASSWORD" | podman login --username "$RH_REGISTRY_USERNAME" --password-stdin registry.redhat.io
@@ -49,12 +49,12 @@ phases:
 
       - |
         set -eo pipefail
-        KEY="$IMAGE_TAG-$ARCH.raw"
+        KEY="$IMAGE_TAG.raw"
         aws s3 cp --only-show-errors "$DISK" "s3://$IMPORT_BUCKET/$KEY"
         CONTAINER="$(jq -nc --arg b "$IMPORT_BUCKET" --arg k "$KEY" \
           '{Format: "RAW", UserBucket: {S3Bucket: $b, S3Key: $k}}')"
         TASK="$(aws ec2 import-snapshot --role-name "$VMIMPORT_ROLE" \
-          --description "bootc $IMAGE_TAG $ARCH" \
+          --description "bootc $IMAGE_TAG" \
           --disk-container "$CONTAINER" \
           --query ImportTaskId --output text)"
         echo "Import task $TASK"
@@ -78,18 +78,18 @@ phases:
         SNAP_GB="$(aws ec2 describe-snapshots --snapshot-ids "$SNAPSHOT_ID" \
           --query 'Snapshots[0].VolumeSize' --output text)"
         SIZE=$(( SNAP_GB > ROOT_VOLUME_SIZE ? SNAP_GB : ROOT_VOLUME_SIZE ))
-        NAME="$AMI_NAME_PREFIX-$IMAGE_TAG-$ARCH"
+        NAME="$AMI_NAME_PREFIX-$IMAGE_TAG"
         MAPPING="$(jq -nc --arg s "$SNAPSHOT_ID" --argjson z "$SIZE" \
           '[{DeviceName: "/dev/xvda", Ebs: {SnapshotId: $s, VolumeSize: $z, VolumeType: "gp3", DeleteOnTermination: true}}]')"
         TAG_SPEC="$(jq -nc --arg n "$NAME" --arg i "$IMAGE_REPO_URL@$IMAGE_DIGEST" --arg c "$COMMIT_ID" \
           '[{ResourceType: "image", Tags: [{Key: "Name", Value: $n}, {Key: "bootc-image", Value: $i}, {Key: "commit", Value: $c}]}]')"
         AMI_ID="$(aws ec2 register-image \
           --name "$NAME" \
-          --description "bootc $IMAGE_REPO_NAME $IMAGE_TAG ($ARCH)" \
-          --architecture "$EC2_ARCH" \
+          --description "bootc $IMAGE_REPO_NAME $IMAGE_TAG" \
+          --architecture x86_64 \
           --virtualization-type hvm \
           --ena-support \
-          --boot-mode "$BOOT_MODE" \
+          --boot-mode uefi-preferred \
           --root-device-name /dev/xvda \
           --block-device-mappings "$MAPPING" \
           --tag-specifications "$TAG_SPEC" \

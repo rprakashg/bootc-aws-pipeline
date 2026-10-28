@@ -1,0 +1,52 @@
+# RHEL 10 bootc image that only accepts updates signed by this pipeline's KMS key
+# and, before each automatic upgrade, checks for a signed SPDX SBOM attestation.
+#
+# Copy this directory to the root of your image repo and set
+# redhat_registry_secret_arn. The build args are passed in by buildspecs/build.yml
+# (repo URL, public key from KMS, whether SBOMs are attested), so nothing here is
+# filled in by hand. Pin a minor release (e.g. :10.0) instead of :latest if needed.
+FROM registry.redhat.io/rhel10/rhel-bootc:latest
+
+ARG IMAGE_REPO_URL
+ARG COSIGN_PUBLIC_KEY_B64
+ARG REQUIRE_SBOM=true
+ARG COSIGN_VERSION=v2.4.1
+
+RUN if [ -z "$IMAGE_REPO_URL" ] || [ -z "$COSIGN_PUBLIC_KEY_B64" ]; then \
+      echo "IMAGE_REPO_URL and COSIGN_PUBLIC_KEY_B64 are required (enable_signing = true)" >&2; exit 1; \
+    fi; \
+    case "$REQUIRE_SBOM" in true|false) ;; *) echo "REQUIRE_SBOM must be true or false" >&2; exit 1;; esac
+
+# registries.d entry (sigstore attachments), SBOM attestation policy,
+# pre-upgrade check script and its systemd drop-in.
+COPY files/ /
+
+# cosign for the pre-upgrade check. /usr/local is /var/usrlocal on bootc hosts, so install to /usr/bin.
+RUN cd /tmp && \
+    curl -sSfL -O "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" \
+               -O "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign_checksums.txt" && \
+    grep " cosign-linux-amd64\$" cosign_checksums.txt | sha256sum -c - && \
+    install -m 0755 cosign-linux-amd64 /usr/bin/cosign && \
+    rm -f cosign-linux-amd64 cosign_checksums.txt && \
+    cosign version
+
+# Trust anchor and policy:
+# - the KMS public key,
+# - a sigstoreSigned requirement for this repository only, merged into RHEL's
+#   policy.json so its own registry.redhat.io rules stay intact,
+# - the registries.d placeholder replaced with the real repository,
+# - settings for /usr/libexec/bootc-verify-image.
+RUN set -e; \
+    install -d -m 0755 /etc/pki/containers /usr/lib/bootc-verify; \
+    echo "$COSIGN_PUBLIC_KEY_B64" | base64 -d > /etc/pki/containers/bootc-image.pub; \
+    grep -q "BEGIN PUBLIC KEY" /etc/pki/containers/bootc-image.pub; \
+    python3 -c 'import json, sys; p = "/etc/containers/policy.json"; d = json.load(open(p)); d.setdefault("transports", {}).setdefault("docker", {})[sys.argv[1]] = [{"type": "sigstoreSigned", "keyPath": sys.argv[2], "signedIdentity": {"type": "matchRepository"}}]; json.dump(d, open(p, "w"), indent=2)' \
+      "$IMAGE_REPO_URL" /etc/pki/containers/bootc-image.pub; \
+    sed -i "s|@IMAGE_REPO_URL@|${IMAGE_REPO_URL}|" /etc/containers/registries.d/bootc-image.yaml; \
+    printf '{"repository": "%s", "key": "/etc/pki/containers/bootc-image.pub", "require_sbom": %s}\n' \
+      "$IMAGE_REPO_URL" "$REQUIRE_SBOM" > /usr/lib/bootc-verify/config.json
+
+# Add your packages and config here. With a RHEL base, dnf needs entitled repos,
+# which an unsubscribed CodeBuild host doesn't provide.
+
+RUN bootc container lint

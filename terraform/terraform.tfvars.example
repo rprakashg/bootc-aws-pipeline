@@ -3,9 +3,6 @@ aws_region    = "us-east-1"
 repository_id = "your-org/edge-os-image"
 branch        = "main"
 
-# Build natively on both; hosts get one multi-arch tag.
-architectures = ["amd64", "arm64"]
-
 # Only start a build when the image definition changes.
 # trigger_file_paths = ["Containerfile", "files/**"]
 
@@ -24,8 +21,10 @@ promotion_tag    = "stable"
 rebuild_schedule = "cron(0 6 ? * MON *)"
 
 enable_signing = true
+# Signed SPDX SBOM attestation (needs enable_signing).
+enable_sbom = true
 
-# AMIs per build (adds ~20-40 min per architecture).
+# An AMI per build (adds ~20-40 min).
 enable_ami = false
 # bib_image       = "registry.redhat.io/rhel9/bootc-image-builder:latest"
 # bib_config_path = "bib/config.toml"

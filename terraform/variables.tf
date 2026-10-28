@@ -78,17 +78,6 @@ variable "image_repository_name" {
   default     = ""
 }
 
-variable "architectures" {
-  description = "Architectures to build natively (amd64, arm64). Each gets its own CodeBuild project; the results are joined into one multi-arch tag."
-  type        = list(string)
-  default     = ["amd64"]
-
-  validation {
-    condition     = length(var.architectures) > 0 && alltrue([for a in var.architectures : contains(["amd64", "arm64"], a)])
-    error_message = "architectures must be a non-empty subset of [amd64, arm64]."
-  }
-}
-
 variable "channel_tag" {
   description = "Moving tag updated on every successful build. Hosts that track it get every build."
   type        = string
@@ -133,10 +122,16 @@ variable "enable_signing" {
   default     = true
 }
 
+variable "enable_sbom" {
+  description = "Generate an SPDX SBOM with syft and attach it as a cosign attestation signed by the same KMS key. Requires enable_signing."
+  type        = bool
+  default     = true
+}
+
 # ---------------------------------------------------------------- AMIs
 
 variable "enable_ami" {
-  description = "Add a stage that converts each build into an AMI per architecture with bootc-image-builder."
+  description = "Add a stage that converts each build into an AMI with bootc-image-builder."
   type        = bool
   default     = false
 }
@@ -162,21 +157,15 @@ variable "ami_root_volume_gb" {
 # ---------------------------------------------------------------- CodeBuild sizing
 
 variable "build_compute_type" {
-  description = "Compute type for image builds and AMI builds, per architecture."
-  type        = map(string)
-  default = {
-    amd64 = "BUILD_GENERAL1_LARGE"
-    arm64 = "BUILD_GENERAL1_LARGE"
-  }
+  description = "Compute type for image builds and AMI builds."
+  type        = string
+  default     = "BUILD_GENERAL1_LARGE"
 }
 
-variable "codebuild_base_images" {
-  description = "Curated CodeBuild images used only to build the podman builder image."
-  type        = map(string)
-  default = {
-    amd64 = "aws/codebuild/amazonlinux-x86_64-standard:5.0"
-    arm64 = "aws/codebuild/amazonlinux-aarch64-standard:3.0"
-  }
+variable "codebuild_base_image" {
+  description = "Curated CodeBuild image used only to build the podman builder image."
+  type        = string
+  default     = "aws/codebuild/amazonlinux-x86_64-standard:5.0"
 }
 
 variable "log_retention_days" {

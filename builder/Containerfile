@@ -10,10 +10,14 @@ FROM quay.io/podman/stable:latest
 RUN dnf -y install skopeo jq awscli2 git && dnf clean all
 
 ARG COSIGN_VERSION=v2.4.1
-RUN arch="$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')" && \
-    curl -sSfL -o /usr/local/bin/cosign \
-      "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-${arch}" && \
+RUN curl -sSfL -o /usr/local/bin/cosign \
+      "https://github.com/sigstore/cosign/releases/download/${COSIGN_VERSION}/cosign-linux-amd64" && \
     chmod +x /usr/local/bin/cosign && cosign version
+
+ARG SYFT_VERSION=1.18.1
+RUN curl -sSfL "https://github.com/anchore/syft/releases/download/v${SYFT_VERSION}/syft_${SYFT_VERSION}_linux_amd64.tar.gz" | \
+      tar -xz -C /usr/local/bin syft && \
+    syft version
 
 # One auth file shared by podman, skopeo and cosign.
 ENV REGISTRY_AUTH_FILE=/root/.docker/config.json \

@@ -11,6 +11,6 @@ phases:
       - |
         set -eo pipefail
         aws ecr get-login-password | podman login --username AWS --password-stdin "$REGISTRY"
-        skopeo copy --all --preserve-digests \
+        skopeo copy --preserve-digests \
           "docker://$IMAGE_REPO_URL@$IMAGE_DIGEST" "docker://$IMAGE_REPO_URL:$PROMOTION_TAG"
         echo "Promoted $IMAGE_TAG ($IMAGE_DIGEST) to :$PROMOTION_TAG"

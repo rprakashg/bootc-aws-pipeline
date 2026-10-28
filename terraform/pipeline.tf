@@ -61,35 +61,49 @@ resource "aws_codepipeline" "bootc" {
 
   stage {
     name = "Builder"
-    dynamic "action" {
-      for_each = local.archs
-      content {
-        name            = "builder-${action.value}"
-        category        = "Build"
-        owner           = "AWS"
-        provider        = "CodeBuild"
-        version         = "1"
-        input_artifacts = ["src"]
-        configuration = {
-          ProjectName = aws_codebuild_project.builder[action.value].name
-        }
+    action {
+      name            = "builder"
+      category        = "Build"
+      owner           = "AWS"
+      provider        = "CodeBuild"
+      version         = "1"
+      input_artifacts = ["src"]
+      configuration = {
+        ProjectName = aws_codebuild_project.builder.name
       }
     }
   }
 
   stage {
     name = "Build"
-    dynamic "action" {
-      for_each = local.archs
-      content {
-        name            = "bootc-${action.value}"
-        category        = "Build"
-        owner           = "AWS"
-        provider        = "CodeBuild"
-        version         = "1"
-        input_artifacts = ["src"]
+    action {
+      name            = "bootc"
+      category        = "Build"
+      owner           = "AWS"
+      provider        = "CodeBuild"
+      version         = "1"
+      input_artifacts = ["src"]
+      configuration = {
+        ProjectName          = aws_codebuild_project.build.name
+        EnvironmentVariables = jsonencode(local.run_env)
+      }
+    }
+  }
+
+  dynamic "stage" {
+    for_each = local.enable_sbom ? [1] : []
+    content {
+      name = "SBOM"
+      action {
+        name             = "sbom-attest"
+        category         = "Build"
+        owner            = "AWS"
+        provider         = "CodeBuild"
+        version          = "1"
+        input_artifacts  = ["src"]
+        output_artifacts = ["sbom"]
         configuration = {
-          ProjectName          = aws_codebuild_project.build[action.value].name
+          ProjectName          = aws_codebuild_project.sbom[0].name
           EnvironmentVariables = jsonencode(local.run_env)
         }
       }
@@ -99,7 +113,7 @@ resource "aws_codepipeline" "bootc" {
   stage {
     name = "Publish"
     action {
-      name            = "index-sign-tag"
+      name            = "sign-tag"
       category        = "Build"
       owner           = "AWS"
       provider        = "CodeBuild"
@@ -117,19 +131,16 @@ resource "aws_codepipeline" "bootc" {
     for_each = var.enable_ami ? [1] : []
     content {
       name = "AMI"
-      dynamic "action" {
-        for_each = local.archs
-        content {
-          name            = "ami-${action.value}"
-          category        = "Build"
-          owner           = "AWS"
-          provider        = "CodeBuild"
-          version         = "1"
-          input_artifacts = ["src"]
-          configuration = {
-            ProjectName          = aws_codebuild_project.ami[action.value].name
-            EnvironmentVariables = jsonencode(local.published_env)
-          }
+      action {
+        name            = "ami"
+        category        = "Build"
+        owner           = "AWS"
+        provider        = "CodeBuild"
+        version         = "1"
+        input_artifacts = ["src"]
+        configuration = {
+          ProjectName          = aws_codebuild_project.ami[0].name
+          EnvironmentVariables = jsonencode(local.published_env)
         }
       }
     }

@@ -4,7 +4,6 @@ locals {
     REGISTRY        = local.registry
     IMAGE_REPO_URL  = aws_ecr_repository.image.repository_url
     IMAGE_REPO_NAME = aws_ecr_repository.image.name
-    ARCHITECTURES   = join(" ", var.architectures)
     REPO_ID         = var.repository_id
   }
 
@@ -13,11 +12,12 @@ locals {
     RH_REGISTRY_PASSWORD = "${var.redhat_registry_secret_arn}:password"
   } : {}
 
-  builder_image = { for a in var.architectures : a => "${aws_ecr_repository.builder.repository_url}:${local.builder_tag}-${a}" }
+  builder_image = "${aws_ecr_repository.builder.repository_url}:${local.builder_tag}"
 
   all_project_arns = concat(
-    [for p in aws_codebuild_project.builder : p.arn],
-    [for p in aws_codebuild_project.build : p.arn],
+    [aws_codebuild_project.builder.arn],
+    [aws_codebuild_project.build.arn],
+    [for p in aws_codebuild_project.sbom : p.arn],
     [aws_codebuild_project.publish.arn],
     [for p in aws_codebuild_project.promote : p.arn],
     [for p in aws_codebuild_project.ami : p.arn],
@@ -29,9 +29,8 @@ locals {
 # every other project runs on. Skips itself when the tag already exists.
 
 resource "aws_codebuild_project" "builder" {
-  for_each      = local.archs
-  name          = "${var.name}-builder-${each.key}"
-  description   = "Builds the podman/skopeo/cosign builder image (${each.key})"
+  name          = "${var.name}-builder"
+  description   = "Builds the podman/skopeo/cosign builder image"
   service_role  = aws_iam_role.codebuild.arn
   build_timeout = 30
 
@@ -45,8 +44,8 @@ resource "aws_codebuild_project" "builder" {
   }
 
   environment {
-    type                        = local.arch[each.key].codebuild_type
-    image                       = var.codebuild_base_images[each.key]
+    type                        = "LINUX_CONTAINER"
+    image                       = var.codebuild_base_image
     compute_type                = "BUILD_GENERAL1_SMALL"
     image_pull_credentials_type = "CODEBUILD"
     privileged_mode             = true
@@ -61,11 +60,11 @@ resource "aws_codebuild_project" "builder" {
     }
     environment_variable {
       name  = "BUILDER_IMAGE"
-      value = local.builder_image[each.key]
+      value = local.builder_image
     }
     environment_variable {
       name  = "BUILDER_TAG"
-      value = "${local.builder_tag}-${each.key}"
+      value = local.builder_tag
     }
     environment_variable {
       name  = "BUILDER_CONTAINERFILE_B64"
@@ -76,17 +75,16 @@ resource "aws_codebuild_project" "builder" {
   logs_config {
     cloudwatch_logs {
       group_name  = aws_cloudwatch_log_group.builds.name
-      stream_name = "builder-${each.key}"
+      stream_name = "builder"
     }
   }
 }
 
-# ---------------------------------------------------------------- bootc image, per arch
+# ---------------------------------------------------------------- bootc image
 
 resource "aws_codebuild_project" "build" {
-  for_each      = local.archs
-  name          = "${var.name}-build-${each.key}"
-  description   = "Builds and lints the bootc image natively on ${each.key}"
+  name          = "${var.name}-build"
+  description   = "Builds and lints the bootc image"
   service_role  = aws_iam_role.codebuild.arn
   build_timeout = 90
 
@@ -100,18 +98,20 @@ resource "aws_codebuild_project" "build" {
   }
 
   environment {
-    type                        = local.arch[each.key].codebuild_type
-    image                       = local.builder_image[each.key]
-    compute_type                = var.build_compute_type[each.key]
+    type                        = "LINUX_CONTAINER"
+    image                       = local.builder_image
+    compute_type                = var.build_compute_type
     image_pull_credentials_type = "SERVICE_ROLE"
     privileged_mode             = true
 
     dynamic "environment_variable" {
       for_each = { for k, v in merge(local.podman_env, {
-        ARCH          = each.key
         CONTAINERFILE = var.containerfile
         BUILD_CONTEXT = var.build_context
         BUILD_ARGS    = local.build_args
+        # Baked into images that enforce signatures (see example/rhel10).
+        COSIGN_PUBLIC_KEY_B64 = var.enable_signing ? base64encode(data.aws_kms_public_key.signing[0].public_key_pem) : ""
+        ENABLE_SBOM           = local.enable_sbom ? "true" : "false"
       }) : k => v if v != "" }
       content {
         name  = environment_variable.key
@@ -132,16 +132,58 @@ resource "aws_codebuild_project" "build" {
   logs_config {
     cloudwatch_logs {
       group_name  = aws_cloudwatch_log_group.builds.name
-      stream_name = "build-${each.key}"
+      stream_name = "build"
     }
   }
 }
 
-# ---------------------------------------------------------------- multi-arch index + signature
+# ---------------------------------------------------------------- SBOM attestation
+
+resource "aws_codebuild_project" "sbom" {
+  count         = local.enable_sbom ? 1 : 0
+  name          = "${var.name}-sbom"
+  description   = "Generates an SPDX SBOM with syft and attaches it as a signed cosign attestation"
+  service_role  = aws_iam_role.codebuild.arn
+  build_timeout = 60
+
+  artifacts {
+    type = "CODEPIPELINE"
+  }
+
+  source {
+    type      = "CODEPIPELINE"
+    buildspec = file("${local.buildspec_dir}/sbom.yml")
+  }
+
+  environment {
+    type                        = "LINUX_CONTAINER"
+    image                       = local.builder_image
+    compute_type                = "BUILD_GENERAL1_MEDIUM"
+    image_pull_credentials_type = "SERVICE_ROLE"
+    privileged_mode             = true
+
+    dynamic "environment_variable" {
+      for_each = merge(local.podman_env, { SIGNING_KEY_ARN = aws_kms_key.signing[0].arn })
+      content {
+        name  = environment_variable.key
+        value = environment_variable.value
+      }
+    }
+  }
+
+  logs_config {
+    cloudwatch_logs {
+      group_name  = aws_cloudwatch_log_group.builds.name
+      stream_name = "sbom"
+    }
+  }
+}
+
+# ---------------------------------------------------------------- signature + channel tag
 
 resource "aws_codebuild_project" "publish" {
   name          = "${var.name}-publish"
-  description   = "Joins per-arch images into one index, signs it, moves the channel tag"
+  description   = "Signs the image, moves the channel tag"
   service_role  = aws_iam_role.codebuild.arn
   build_timeout = 30
 
@@ -155,8 +197,8 @@ resource "aws_codebuild_project" "publish" {
   }
 
   environment {
-    type                        = local.arch[local.primary_arch].codebuild_type
-    image                       = local.builder_image[local.primary_arch]
+    type                        = "LINUX_CONTAINER"
+    image                       = local.builder_image
     compute_type                = "BUILD_GENERAL1_SMALL"
     image_pull_credentials_type = "SERVICE_ROLE"
     privileged_mode             = true
@@ -200,8 +242,8 @@ resource "aws_codebuild_project" "promote" {
   }
 
   environment {
-    type                        = local.arch[local.primary_arch].codebuild_type
-    image                       = local.builder_image[local.primary_arch]
+    type                        = "LINUX_CONTAINER"
+    image                       = local.builder_image
     compute_type                = "BUILD_GENERAL1_SMALL"
     image_pull_credentials_type = "SERVICE_ROLE"
     privileged_mode             = true
@@ -223,12 +265,12 @@ resource "aws_codebuild_project" "promote" {
   }
 }
 
-# ---------------------------------------------------------------- AMIs, per arch
+# ---------------------------------------------------------------- AMI
 
 resource "aws_codebuild_project" "ami" {
-  for_each      = var.enable_ami ? local.archs : toset([])
-  name          = "${var.name}-ami-${each.key}"
-  description   = "Converts the bootc image into an AMI with bootc-image-builder (${each.key})"
+  count         = var.enable_ami ? 1 : 0
+  name          = "${var.name}-ami"
+  description   = "Converts the bootc image into an AMI with bootc-image-builder"
   service_role  = aws_iam_role.codebuild.arn
   build_timeout = 180
 
@@ -242,24 +284,21 @@ resource "aws_codebuild_project" "ami" {
   }
 
   environment {
-    type                        = local.arch[each.key].codebuild_type
-    image                       = local.builder_image[each.key]
-    compute_type                = var.build_compute_type[each.key]
+    type                        = "LINUX_CONTAINER"
+    image                       = local.builder_image
+    compute_type                = var.build_compute_type
     image_pull_credentials_type = "SERVICE_ROLE"
     privileged_mode             = true
 
     dynamic "environment_variable" {
       for_each = { for k, v in merge(local.podman_env, {
-        ARCH             = each.key
-        EC2_ARCH         = local.arch[each.key].ec2_arch
-        BOOT_MODE        = local.arch[each.key].boot_mode
         BIB_IMAGE        = var.bib_image
         BIB_CONFIG       = var.bib_config_path
         IMPORT_BUCKET    = aws_s3_bucket.ami_import[0].bucket
         VMIMPORT_ROLE    = aws_iam_role.vmimport[0].name
         AMI_NAME_PREFIX  = "${var.name}-bootc"
         ROOT_VOLUME_SIZE = tostring(var.ami_root_volume_gb)
-        AMI_PARAMETER    = "/${var.name}/bootc/ami/${each.key}"
+        AMI_PARAMETER    = "/${var.name}/bootc/ami"
       }) : k => v if v != "" }
       content {
         name  = environment_variable.key
@@ -280,7 +319,7 @@ resource "aws_codebuild_project" "ami" {
   logs_config {
     cloudwatch_logs {
       group_name  = aws_cloudwatch_log_group.builds.name
-      stream_name = "ami-${each.key}"
+      stream_name = "ami"
     }
   }
 }

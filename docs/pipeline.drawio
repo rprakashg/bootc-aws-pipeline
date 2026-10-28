@@ -1,6 +1,6 @@
 <mxfile host="drawio" version="24.0.0">
   <diagram id="bootc-pipeline" name="bootc image pipeline">
-    <mxGraphModel dx="1400" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1500" pageHeight="400" math="0" shadow="0">
+    <mxGraphModel dx="1400" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="1740" pageHeight="400" math="0" shadow="0">
       <root>
         <mxCell id="0" />
         <mxCell id="1" parent="0" />
@@ -31,34 +31,36 @@
           <mxGeometry x="520" y="110" width="180" height="170" as="geometry" />
         </mxCell>
         <mxCell id="build-amd64" value="&lt;b&gt;amd64&lt;/b&gt;&lt;br&gt;build&lt;br&gt;lint&lt;br&gt;push" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="build">
-          <mxGeometry x="10" y="40" width="75" height="120" as="geometry" />
+          <mxGeometry x="10" y="40" width="160" height="120" as="geometry" />
         </mxCell>
-        <mxCell id="build-arm64" value="&lt;b&gt;arm64&lt;/b&gt;&lt;br&gt;build&lt;br&gt;lint&lt;br&gt;push" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#6c8ebf;" vertex="1" parent="build">
-          <mxGeometry x="95" y="40" width="75" height="120" as="geometry" />
+
+        <!-- SBOM -->
+        <mxCell id="sbom" value="SBOM" style="swimlane;rounded=1;whiteSpace=wrap;html=1;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="760" y="110" width="180" height="170" as="geometry" />
+        </mxCell>
+        <mxCell id="sbom-body" value="syft → SPDX SBOM&lt;br&gt;↓&lt;br&gt;cosign attest" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="sbom">
+          <mxGeometry x="10" y="40" width="160" height="120" as="geometry" />
         </mxCell>
 
         <!-- Publish -->
         <mxCell id="publish" value="Publish" style="swimlane;rounded=1;whiteSpace=wrap;html=1;startSize=30;fillColor=#dae8fc;strokeColor=#6c8ebf;fontStyle=1;" vertex="1" parent="1">
-          <mxGeometry x="760" y="110" width="180" height="170" as="geometry" />
+          <mxGeometry x="1000" y="110" width="180" height="170" as="geometry" />
         </mxCell>
-        <mxCell id="publish-body" value="multi-arch index&lt;br&gt;cosign sign&lt;br&gt;tag &lt;code&gt;:latest&lt;/code&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="publish">
+        <mxCell id="publish-body" value="cosign sign&lt;br&gt;↓&lt;br&gt;tag &lt;code&gt;:latest&lt;/code&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="publish">
           <mxGeometry x="10" y="40" width="160" height="120" as="geometry" />
         </mxCell>
 
         <!-- AMI (optional) -->
         <mxCell id="ami" value="AMI (optional)" style="swimlane;rounded=1;whiteSpace=wrap;html=1;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="1000" y="110" width="180" height="170" as="geometry" />
+          <mxGeometry x="1240" y="110" width="180" height="170" as="geometry" />
         </mxCell>
-        <mxCell id="ami-amd64" value="&lt;b&gt;amd64&lt;/b&gt;&lt;br&gt;bib&lt;br&gt;↓&lt;br&gt;snapshot&lt;br&gt;↓&lt;br&gt;AMI&lt;br&gt;↓&lt;br&gt;SSM param" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="ami">
-          <mxGeometry x="10" y="40" width="75" height="120" as="geometry" />
-        </mxCell>
-        <mxCell id="ami-arm64" value="&lt;b&gt;arm64&lt;/b&gt;&lt;br&gt;bib&lt;br&gt;↓&lt;br&gt;snapshot&lt;br&gt;↓&lt;br&gt;AMI&lt;br&gt;↓&lt;br&gt;SSM param" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="ami">
-          <mxGeometry x="95" y="40" width="75" height="120" as="geometry" />
+        <mxCell id="ami-amd64" value="&lt;b&gt;x86_64&lt;/b&gt;&lt;br&gt;bib → snapshot&lt;br&gt;→ AMI&lt;br&gt;→ SSM param" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#ffffff;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="ami">
+          <mxGeometry x="10" y="40" width="160" height="120" as="geometry" />
         </mxCell>
 
         <!-- Promote (optional) -->
         <mxCell id="promote" value="Promote (optional)" style="swimlane;rounded=1;whiteSpace=wrap;html=1;startSize=30;fillColor=#fff2cc;strokeColor=#d6b656;fontStyle=1;dashed=1;" vertex="1" parent="1">
-          <mxGeometry x="1240" y="110" width="180" height="170" as="geometry" />
+          <mxGeometry x="1480" y="110" width="180" height="170" as="geometry" />
         </mxCell>
         <mxCell id="promote-body" value="manual approval&lt;br&gt;↓&lt;br&gt;tag &lt;code&gt;:stable&lt;/code&gt;" style="text;html=1;align=center;verticalAlign=middle;whiteSpace=wrap;" vertex="1" parent="promote">
           <mxGeometry x="10" y="40" width="160" height="120" as="geometry" />
@@ -74,7 +76,10 @@
         <mxCell id="e-builder-build" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="builder" target="build">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
-        <mxCell id="e-build-publish" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="build" target="publish">
+        <mxCell id="e-build-sbom" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="build" target="sbom">
+          <mxGeometry relative="1" as="geometry" />
+        </mxCell>
+        <mxCell id="e-sbom-publish" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="sbom" target="publish">
           <mxGeometry relative="1" as="geometry" />
         </mxCell>
         <mxCell id="e-publish-ami" style="edgeStyle=orthogonalEdgeStyle;rounded=0;html=1;endArrow=block;endFill=1;" edge="1" parent="1" source="publish" target="ami">

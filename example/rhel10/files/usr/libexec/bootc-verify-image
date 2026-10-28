@@ -1,0 +1,77 @@
+#!/usr/bin/python3
+"""Verify the image bootc would upgrade to before bootc-fetch-apply-updates runs.
+
+Checks the cosign signature and, when required, the signed SPDX SBOM
+attestation on the image's digest, evaluated against SBOM_POLICY. Exits
+non-zero on any failure so the upgrade unit stops.
+
+Settings come from /usr/lib/bootc-verify/config.json, written at image build time.
+"""
+import hashlib
+import json
+import os
+import subprocess
+import sys
+import tempfile
+
+CONFIG = "/usr/lib/bootc-verify/config.json"
+SBOM_POLICY = "/usr/lib/bootc-verify/sbom-policy.rego"
+AUTHFILE = "/etc/ostree/auth.json"
+
+
+def run(*args, env=None):
+    return subprocess.run(args, check=True, stdout=subprocess.PIPE, env=env).stdout
+
+
+def repository(ref):
+    """Strip the tag or digest from an image reference."""
+    name = ref.split("@", 1)[0]
+    if ":" in name.rsplit("/", 1)[-1]:
+        name = name.rsplit(":", 1)[0]
+    return name
+
+
+def main():
+    with open(CONFIG) as f:
+        cfg = json.load(f)
+
+    image = (json.loads(run("bootc", "status", "--format=json")).get("spec") or {}).get("image") or {}
+    ref = image.get("image")
+    if not ref or image.get("transport", "registry") != "registry":
+        print("bootc is not tracking a registry image; nothing to verify")
+        return 0
+    repo = repository(ref)
+    if repo != cfg["repository"]:
+        print(f"{repo} is not {cfg['repository']}; skipping")
+        return 0
+
+    auth = ["--authfile", AUTHFILE] if os.path.exists(AUTHFILE) else []
+    raw = run("skopeo", "inspect", "--raw", *auth, f"docker://{ref}")
+    if "manifests" in json.loads(raw):
+        print(f"{ref} is a multi-arch index; this pipeline publishes single amd64 images", file=sys.stderr)
+        return 1
+    digest = "sha256:" + hashlib.sha256(raw).hexdigest()
+
+    with tempfile.TemporaryDirectory() as tmp:
+        # cosign reads registry credentials from $DOCKER_CONFIG/config.json; auth.json has the same format.
+        if auth:
+            os.symlink(AUTHFILE, os.path.join(tmp, "config.json"))
+        env = {**os.environ, "DOCKER_CONFIG": tmp, "HOME": tmp}
+        common = ["--key", cfg["key"], "--insecure-ignore-tlog"]
+
+        run("cosign", "verify", *common, f"{repo}@{digest}", env=env)
+        print(f"Signature OK: {repo}@{digest}")
+
+        if cfg.get("require_sbom"):
+            run("cosign", "verify-attestation", *common, "--type", "spdxjson",
+                "--policy", SBOM_POLICY, f"{repo}@{digest}", env=env)
+            print(f"SBOM attestation OK: {repo}@{digest} (passed {SBOM_POLICY})")
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main())
+    except subprocess.CalledProcessError as e:
+        print(f"Verification failed: {' '.join(e.cmd[:2])} exited {e.returncode}", file=sys.stderr)
+        sys.exit(1)

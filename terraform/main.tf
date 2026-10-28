@@ -16,18 +16,11 @@ locals {
 
   buildspec_dir = "${path.module}/../buildspecs"
 
-  arch = {
-    amd64 = { codebuild_type = "LINUX_CONTAINER", ec2_arch = "x86_64", boot_mode = "uefi-preferred" }
-    arm64 = { codebuild_type = "ARM_CONTAINER", ec2_arch = "arm64", boot_mode = "uefi" }
-  }
-  archs = toset(var.architectures)
-
-  # The publish/promote stages run on whichever architecture is listed first.
-  primary_arch = var.architectures[0]
-
   use_rh_registry = var.redhat_registry_secret_arn != ""
 
   build_args = join(" ", [for k, v in var.build_args : "--build-arg ${k}=${v}"])
+
+  enable_sbom = var.enable_signing && var.enable_sbom
 }
 
 resource "aws_codestarconnections_connection" "source" {

@@ -34,7 +34,7 @@ output "cosign_key_ref" {
   value = var.enable_signing ? "awskms:///${aws_kms_key.signing[0].arn}" : null
 }
 
-output "ami_parameters" {
-  description = "SSM parameters holding the newest AMI per arch; reference as resolve:ssm:<name> in launch templates."
-  value       = var.enable_ami ? { for a in var.architectures : a => "/${var.name}/bootc/ami/${a}" } : null
+output "ami_parameter" {
+  description = "SSM parameter holding the newest AMI; reference as resolve:ssm:<name> in launch templates."
+  value       = var.enable_ami ? "/${var.name}/bootc/ami" : null
 }

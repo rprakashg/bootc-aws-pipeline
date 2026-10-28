@@ -1,0 +1,5 @@
+# Look for cosign signatures and attestations stored next to the image in ECR.
+# @IMAGE_REPO_URL@ is replaced at build time.
+docker:
+  @IMAGE_REPO_URL@:
+    use-sigstore-attachments: true

@@ -97,7 +97,7 @@ data "aws_iam_policy_document" "codebuild" {
     content {
       sid       = "AmiParameter"
       actions   = ["ssm:PutParameter", "ssm:GetParameter"]
-      resources = ["arn:${local.partition}:ssm:${var.aws_region}:${local.account_id}:parameter/${var.name}/bootc/ami/*"]
+      resources = ["arn:${local.partition}:ssm:${var.aws_region}:${local.account_id}:parameter/${var.name}/bootc/ami"]
     }
   }
 

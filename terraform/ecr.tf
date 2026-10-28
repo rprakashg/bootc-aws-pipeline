@@ -22,8 +22,8 @@ resource "aws_ecr_repository" "builder" {
   }
 }
 
-# Only untagged images expire. Tagged builds, per-arch images referenced by a
-# multi-arch index, and cosign signatures (sha256-*.sig) are all tagged and kept.
+# Only untagged images expire. Tagged builds and cosign signatures and
+# attestations (sha256-*.sig, *.att) are all tagged and kept.
 resource "aws_ecr_lifecycle_policy" "image" {
   repository = aws_ecr_repository.image.name
   policy = jsonencode({
