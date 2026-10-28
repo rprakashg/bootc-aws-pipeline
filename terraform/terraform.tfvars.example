@@ -1,6 +1,6 @@
-name          = "edge-os"
+name          = "app-server"
 aws_region    = "us-east-1"
-repository_id = "your-org/edge-os-image"
+repository_id = "your-org/app-server-image"
 branch        = "main"
 
 # Only start a build when the image definition changes.

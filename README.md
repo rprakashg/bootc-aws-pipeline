@@ -59,10 +59,10 @@ Type=oneshot
 ExecStart=/bin/sh -c 'aws ecr get-login-password --region us-east-1 | podman login --authfile /etc/ostree/auth.json --username AWS --password-stdin 111122223333.dkr.ecr.us-east-1.amazonaws.com'
 ```
 
-Credentials depend on where the host runs:
+Credentials come from the EC2 instance profile:
 
-- **On EC2:** attach `image_pull_policy_arn` to the instance profile.
-- **Edge devices outside AWS:** use IAM Roles Anywhere so devices authenticate with an X.509 certificate instead of long-lived keys. Alternatively, mirror ECR into an on-site registry (Quay, Harbor) and point devices there.
+- **Same account:** attach `image_pull_policy_arn` to the instance profile's role. Put the instance profile in the launch template so Auto Scaling groups get it too.
+- **Other AWS accounts:** add an ECR repository policy that grants those accounts `ecr:BatchGetImage`, `ecr:GetDownloadUrlForLayer` and `ecr:BatchCheckLayerAvailability`, then attach an equivalent pull policy to their instance profiles.
 
 **Signatures and SBOM attestations.** With `enable_signing`, Publish signs the image digest with the KMS key. With `enable_sbom` (the default), an SBOM stage runs before Publish: syft generates an SPDX SBOM for the image, and it is attached as a cosign attestation on the same digest, signed by the same key. The SBOM is also kept as the stage's `sbom` pipeline artifact. Because it runs first, `:latest` never points at an image without an attestation. Signatures and attestations are kept in ECR next to the image (`sha256-<digest>.sig` / `.att`), and nothing is uploaded to the public Rekor log.
 

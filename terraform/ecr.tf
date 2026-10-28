@@ -57,8 +57,8 @@ resource "aws_ecr_lifecycle_policy" "builder" {
   })
 }
 
-# Attach this to whatever pulls the image: an EC2 instance profile, or an IAM
-# user/role whose credentials an edge device uses to refresh its auth.json.
+# Attach this to the role behind the instance profile of every EC2 instance
+# that runs the image, so it can refresh /etc/ostree/auth.json and pull updates.
 data "aws_iam_policy_document" "image_pull" {
   statement {
     actions   = ["ecr:GetAuthorizationToken"]
